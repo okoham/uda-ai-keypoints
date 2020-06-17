@@ -8,6 +8,78 @@ import torch.nn.functional as F
 import torch.nn.init as I
 
 
+class Net1(nn.Module):
+    
+    def __init__(self):
+        super(Net1, self).__init__()
+        # input size: 224 x 224
+        # output size = (W-F)/S +1 = (224-7)/3 + 1 = 73
+        # after pooling: 24
+        self.conv1 = nn.Conv2d(1, 16, 7, stride=3)
+                 
+        
+        ## Note that among the layers to add, consider including:
+        # maxpooling layers, multiple conv layers, fully-connected layers, and other layers (such as dropout 
+        # or batch normalization) to avoid overfitting
+        # maxpool that uses a square window of kernel_size=2, stride=2
+        self.pool = nn.MaxPool2d(3, 3)  
+        self.fc1 = nn.Linear(16*24*24, 1000)
+        self.fc2 = nn.Linear(1000, 136)
+
+        
+    def forward(self, x):
+        ## TODO: Define the feedforward behavior of this model
+        ## x is the input image and, as an example, here you may choose to include a pool/conv step:
+        ## x = self.pool(F.relu(self.conv1(x)))
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)          
+        x = x.view(-1, 16*24*24)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)        
+
+        # a modified x, having gone through all the layers of your model, should be returned
+        return x
+    
+class Net2(nn.Module):
+    
+    def __init__(self):
+        super(Net2, self).__init__()
+        # input size: 224 x 224
+        # output size = (W-F)/S +1 = (224-5)/2 + 1 = 110
+        # after pooling: 55
+        self.conv1 = nn.Conv2d(1, 16, 5, stride=2)
+        # input size: 55 x 55
+        # output size = (W-F)/S +1 = (55-3)/1 + 1 = 53
+        # after pooling: 26
+        self.conv2 = nn.Conv2d(16, 32, 3)
+        
+        ## Note that among the layers to add, consider including:
+        # maxpooling layers, multiple conv layers, fully-connected layers, and other layers (such as dropout 
+        # or batch normalization) to avoid overfitting
+        # maxpool that uses a square window of kernel_size=2, stride=2
+        self.pool = nn.MaxPool2d(2, 2)  
+        self.fc1 = nn.Linear(32*26*26, 6000)
+        self.fc2 = nn.Linear(6000, 1000)
+        self.fc3 = nn.Linear(1000, 136)
+
+        
+    def forward(self, x):
+        ## TODO: Define the feedforward behavior of this model
+        ## x is the input image and, as an example, here you may choose to include a pool/conv step:
+        ## x = self.pool(F.relu(self.conv1(x)))
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)          
+        x = F.relu(self.conv2(x))
+        x = self.pool(x)          
+        x = x.view(-1, 32*26*26)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)        
+
+        # a modified x, having gone through all the layers of your model, should be returned
+        return x
+    
+
 class Net(nn.Module):
 
     def __init__(self):
