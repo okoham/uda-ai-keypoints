@@ -6,6 +6,56 @@ import torch.nn as nn
 import torch.nn.functional as F
 # can use the below import should you choose to initialize the weights of your Net
 import torch.nn.init as I
+#from collections import OrderedDict
+
+IMAGE_SIZE = 224     # square image: W == H
+OUTPUT_SIZE = 136    # 68 keypoints
+
+
+class Net12(nn.Module):
+
+    IN_CHANNELS_CONV1 = 1    # grayscale image
+    OUT_CHANNELS_CONV1 = 16
+    KERNEL_SIZE_CONV1 = 7    # square kernel
+    STRIDE_CONV1 = 3         # reduce image size faster
+    KERNEL_SIZE_POOL = 3     # default stride: equal to kernel size
+    OUT_FEATURES_FC1 = 1000
+
+
+    def __init__(self):
+        super(Net12, self).__init__()
+
+        # calculation out width of output map
+        # general case described in https://pytorch.org/docs/stable/nn.html#conv2d
+        # here only specific case: (W-F) // S + 1
+        out_size_conv1 = (IMAGE_SIZE - self.KERNEL_SIZE_CONV1)//self.STRIDE_CONV1 + 1
+        self.conv1 = nn.Conv2d(self.IN_CHANNELS_CONV1, self.OUT_CHANNELS_CONV1, 
+                               self.KERNEL_SIZE_CONV1, stride=self.STRIDE_CONV1)
+                 
+        # calculation out width of output map after maxpool
+        # general case described in https://pytorch.org/docs/stable/nn.html#maxpool2d
+        # here only specific case: (W-F) // S + 1
+        out_size_pool = out_size_conv1 // self.KERNEL_SIZE_POOL
+        self.pool = nn.MaxPool2d(self.KERNEL_SIZE_POOL)  
+
+        # calculate number of input features for fully connected layers:
+        # number of channels * number of pixels in output from pooling layer
+        self.in_features_fc1 = self.OUT_CHANNELS_CONV1 * out_size_pool**2  # square
+        self.fc1 = nn.Linear(self.in_features_fc1, self.OUT_FEATURES_FC1)
+        self.fc2 = nn.Linear(self.OUT_FEATURES_FC1, 136)
+
+        # TODO: Weight initialisation
+
+
+        
+    def forward(self, x):
+
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)          
+        x = x.view(-1, self.in_features_fc1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)        
+        return x
 
 
 class Net1(nn.Module):
