@@ -1,20 +1,21 @@
 import sys
 import time
 import copy 
+import datetime
 
+import numpy as np
+import random
+import json
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-#from collections import OrderedDict
-import numpy as np
 import torch
 from torch import nn
 from torch import optim
-#import torchvision
-#from torchvision import models
-# create dataloader
+import torch.nn.functional as F
+
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from torch.utils.data import Subset
@@ -23,25 +24,38 @@ from torch.utils.data import Subset
 from data_load import FacialKeypointsDataset
 # the transforms we defined in Notebook 1 are in the helper file `data_load.py`
 from data_load import Rescale, RandomCrop, Normalize, ToTensor
+
 import models
 
 
 DEVICE = torch.device("cpu")
+random.seed(1234)
 
 
-
-def train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=25):
+def train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=1):
+    """Train a model. After training, the model weights are set to those that resulted 
+    in the lowest validation loss during training.
+    
+    Parameters:
+    - model: a model instance
+    - dataloaders: a dictionary. Must have keys "train" and "val", and dataloaders as values
+    - criterion: a loss function
+    - optimizer: an optimizer instance
+    - scheduler: a method from torch.optim.lr_scheduler
+    - num_epochs: number of epochs to train (default 1)
+    
+    Returns:
+    - history: dict with training/validation loss history
     """
-    dataloaders: dict, with kays "train", "val"
-    """
-
-    since = time.time()
 
     best_model_wts = copy.deepcopy(model.state_dict())
+
+    # set initial loss to infinity
     best_loss = np.inf 
 
     dataset_sizes = {k: len(loader.dataset) for k, loader in dataloaders.items()}
 
+    # initialise 
     history = {'train': [], 'val': []}
 
     for epoch in range(num_epochs):
@@ -56,9 +70,8 @@ def train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
-            #running_corrects = 0
 
-            # Iterate over data.
+            # Iterate over data batches
             dataloader = dataloaders[phase]
             for batch_i, data in enumerate(dataloader):
 
@@ -70,8 +83,8 @@ def train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=
                 key_pts = key_pts.view(key_pts.size(0), -1)
 
                 # convert variables to floats for regression loss
-                key_pts = key_pts.type(torch.FloatTensor)
                 images = images.type(torch.FloatTensor)
+                key_pts = key_pts.type(torch.FloatTensor)
 
                 # zero the parameter (weight) gradients
                 optimizer.zero_grad()                
@@ -87,7 +100,7 @@ def train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=
                     loss.backward()
                     optimizer.step()            
 
-                # statistics
+                # Statistics. Loss function returns mean loss over images; multiply by size of current batch
                 running_loss += loss.item() * images.size(0)
 
             # learning rate scheduler
@@ -98,184 +111,23 @@ def train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=
             epoch_loss = running_loss / dataset_sizes[phase]
             history[phase].append(epoch_loss)
             print('{} Loss: {:.4f}'.format(phase, epoch_loss))
-
+          
             # deep copy the model
             if phase == 'val' and epoch_loss < best_loss:
                 best_loss = epoch_loss
                 best_model_wts = copy.deepcopy(model.state_dict())
 
-
-    time_elapsed = time.time() - since
-    print('\nTraining complete in {:.0f}m {:.0f}s'.format(
-        time_elapsed // 60, time_elapsed % 60))
-    print('Best val loss: {:4f}'.format(best_loss))
+    # final message
+    print('\nBest val loss: {:4f}'.format(best_loss))
 
     # load best model weights
     model.load_state_dict(best_model_wts)
-    return model, history
 
-
-def _test_model(model, device, dataloader, prefix=""):
-    """Evaluate the model. Can be used for validation (during training) and testing.
-    
-    Params: 
-    - model: the model
-    - dataloader: a torch.utils.data.DataLoader instance
-    - prefix: What to display on screen during evaluation (usually "Validation" or "Test"
-    
-    Returns:
-    - loss
-    - accuracy
-    """
-
-    model.eval()   # Set model to evaluate mode
-
-    dataset_size = len(dataloader.dataset)
-    count = 0
-    running_loss = 0.0
-    running_corrects = 0
-
-    for inputs, labels in dataloader:
-        inputs = inputs.to(device) # shape (batchsize, 3, width, height)
-        labels = labels.to(device) # 1-d array, shape (batchsize,)
-        # forward
-        with torch.no_grad():
-            outputs = model(inputs) # shape: 
-            proba = torch.exp(outputs) # shape: 
-            preds = torch.argmax(proba, dim=1) # 1-d array, shape (batchsize,)
-            loss = criterion(outputs, labels) 
-        # statistics
-        running_loss += loss.item() * inputs.size(0)
-        running_corrects += torch.sum(preds == labels.data)
-        count += inputs.size(0)
-        # display progress
-        sys.stdout.write("\r%s: %i/%i - loss: %.3f, acc: %.3f" % (prefix, count, 
-                                                 dataset_size, 
-                                                 running_loss/count, 
-                                                 running_corrects.double()/count))
-    sys.stdout.write("\n")
-    
-    loss = running_loss / dataset_size
-    acc = running_corrects.item() / dataset_size
-    return loss, acc
-
-
-
-def _train_model(model, device, optimizer, train_dataloader, valid_dataloader, num_epochs=5):
-    """Train a model.
-    
-    Parameters:
-    - model: a model instance
-    - optimizer: an optimizer instance
-    - train_dataloader: 
-    - valid_dataloader: 
-    - num_epochs: number of epochs to train (default 5)
-    
-    Returns:
-    - None
-    """
-    training_size = len(train_dataloader.dataset)
-    model.train()
-
-    for epoch in range(num_epochs):
-        print('Epoch {}/{}'.format(epoch+1, num_epochs))
-
-        running_loss = 0.0             # running training loss
-        running_corrects = 0           # running training correct samples
-        count = 0                      # running number of samples
-        
-        # Iterate over data batches
-        for inputs, labels in train_dataloader: 
-            inputs = inputs.to(device)
-            labels = labels.to(device) # 1-d array, shape (batchsize,)
-            # zero the parameter gradients
-            optimizer.zero_grad()
-            # forward
-            outputs = model(inputs)
-            proba = torch.exp(outputs)
-            preds = torch.argmax(proba, dim=1) # 1-d array, shape (batchsize,)
-            loss = criterion(outputs, labels)
-            # backward 
-            loss.backward()
-            optimizer.step()
-            # statistics
-            running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data)
-            count += inputs.size(0)
-            sys.stdout.write("\rTrain: %i/%i - loss: %.3f, acc: %.3f" % (count, 
-                                                     training_size, 
-                                                     running_loss/count, 
-                                                     running_corrects.double()/count))
-                
-        epoch_loss = running_loss / training_size
-        epoch_acc = running_corrects.double() / training_size
-        print()
-        # validation 
-        model.eval()
-        valid_loss, valid_acc = test_model(model, device, valid_dataloader, prefix="Validation")
-        print('Train loss: {:.4f}, acc: {:.4f}    Valid loss: {:.4f}, acc: {:.4f}\n'.format(epoch_loss, epoch_acc, valid_loss, valid_acc))
-        model.train()
-
+    return history
 
     
-def save_checkpoint(model, fpath, arch, n_hidden, class_to_idx, optimizer, epochs, lr, description=""):
-    """Save a model alsong with some hyperparameters.
-    
-    Params:
-    - model: the model instance to save
-    - fpath (string): path where the model should be saved
-    - arch (string): the model architechture (like 'vgg16', vgg16_bn', ...)
-    - n_hidden (int): number of hidden units in classifier layer
-    - class_to_idx (dict of str: int): distionary, maps class names (directory names) to index of output layer
-    - optimizer: the optimizer instance used to train the model.
-    - epochs (int): number of epochs trained so far
-    - lr (float): learning rate used
-    - desription (str): some descriptive information, e.g. how well it performed om test data
-    
-    Returns:
-    - None
-    """
-    checkpoint = {
-        "state_dict": model.state_dict(),
-        "arch": model.arch,
-        "n_hidden": model.n_hidden,
-        "class_to_idx": class_to_idx,
-        "description": description,
-        "epochs": epochs,
-        "lr": lr,
-        "optimizer_state_dict": optimizer.state_dict()
-    }
-    torch.save(checkpoint, fpath)
-        
-        
-        
-def load_checkpoint(fpath):
-    """Return a saved model.
-    
-    Params:
-    - fpath (str): path to model checkpoint file
-    
-    Returns: 
-    - model
-    """
-    
-    checkpoint = torch.load(fpath, map_location='cpu')
-    print(checkpoint["description"])
-    
-    arch = checkpoint['arch']
-    class_to_idx = checkpoint['class_to_idx']
-    # build empty model (without pretrained weights), then load the saved weights.
-    model = build_model(arch, len(class_to_idx), n_hidden=checkpoint['n_hidden'], pretrained=False)
-    model.load_state_dict(checkpoint['state_dict'])
-    # attach class names and inverted index
-    model.class_to_idx = class_to_idx
-    model.idx_to_class = {v:k for k, v in class_to_idx.items()}
-    model.eval()
-    
-    return model
-    
 
-def history_plot_image(history, img_path):
+def plot_history(history):
     """history plot, return image"""
     fig, ax = plt.subplots()
     ax.plot(history['train'], "o-", label="train")
@@ -295,7 +147,71 @@ def history_plot_image(history, img_path):
     return fig
 
 
+def train_val_split(dataset, train_size=0.8):
+    """Split dataset into training and validation part. Data are shuffled.
+    """
+
+    assert train_size <= 1
+
+    num_samples = len(dataset)       
+    num_train = int(train_size*num_samples)
+
+    indices = np.arange(num_samples)
+    random.shuffle(indices)
+    train_indices = indices[:num_train]
+    val_indices = indices[num_train:]
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+
+    return train_dataset, val_dataset
+
+
+
 if __name__ == '__main__':
+
+    import argparse
+
+    archs = ['Net12', 'Net12d', 'Net22', 'Net22d', 'Net32d', 'Net33d']
+    optimizers = ['Adadelta', 'Adagrad', 'Adam', 'RMSprop', 'SGD']
+    loss_funcs = {'mse_loss': F.mse_loss, 'l1_loss': F.l1_loss, 'smooth_l1_loss': F.smooth_l1_loss}
+
+    parser = argparse.ArgumentParser(description='Train a new model.')
+    #parser.add_argument('--title', type=str, default="", 
+    #                    help='short title of model')
+    parser.add_argument('--subset_size', type=int, default=0, 
+                        help='Use only a subset of data (for development)')
+    parser.add_argument('--lr', type=float, default=0.001, 
+                        help='learning rate (default 0.001)')
+    parser.add_argument('--epochs', type=int, default=10, 
+                        help='number of epochs for training (default 10)')
+    parser.add_argument('--batch_size', type=int, default=10, 
+                        help='batch size (default 10)')
+    parser.add_argument('--arch', type=str, default='Net12', 
+                        help='Network architecture, one of: %s. Default Net12' % archs)
+    parser.add_argument('--optimizer', type=str, default='Adam', 
+                        help='Optimizers, one of: %s. Default Net12' % optimizers)
+    parser.add_argument('--loss_func', type=str, default='mse_loss', 
+                        help='Loss function, one of: %s. Default mse_loss' % list(loss_funcs.keys()))
+    parser.add_argument('--save_dir', type=str, default="runs", 
+                        help='path to directory where trained model checkpoints should be saved')
+
+    args = parser.parse_args()
+
+    assert args.arch in archs, f"Error: Network architecture {args.arch} not found."
+    arch = getattr(models, args.arch)
+    model = arch()
+
+    assert args.optimizer in optimizers, f"Error: Optimizer {args.optimizer} not found."
+    opti = getattr(optim, args.optimizer)
+    optimizer = opti(model.parameters(), lr=args.lr)
+
+    assert args.loss_func in loss_funcs, f"Error: Network architecture {args.loss_func} not found."
+    criterion = loss_funcs[args.loss_func]
+
+    # hard-coded
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+    
 
     # Define a transform
     data_transform = transforms.Compose([
@@ -305,78 +221,55 @@ if __name__ == '__main__':
         ToTensor(),
     ])
 
-    
-
     # create the transformed dataset
     train_val_dataset = FacialKeypointsDataset(csv_file='data/training_frames_keypoints.csv',
                                                 root_dir='data/training/',
                                                 transform=data_transform)
 
-    # FIXME
-    train_val_dataset = Subset(train_val_dataset, range(500))
-
+    # for faster experimentation select only a subset of images
+    if args.subset_size > 0:
+        train_val_dataset = Subset(train_val_dataset, range(args.subset_size))
+    
     print('Number of images: ', len(train_val_dataset))
 
-    # split train/val
-    # FIXME: make a function of ot this
-    pct_train = 0.7
-    batch_size = 16
+    # split train/val - hard coded
+    train_size = 0.8
+    train_dataset, val_dataset = train_val_split(train_val_dataset, train_size=train_size)
 
-    import random
-    random.seed(1234)
-
-    num_samples = len(train_val_dataset)
-    num_train = int(pct_train*num_samples)
-    #rng = np.random.default_rng(1234)
-    indices = np.arange(num_samples)
-    random.shuffle(indices)
-    train_indices = indices[:num_train]
-    val_indices = indices[num_train:]
-
-    train_dataset = Subset(train_val_dataset, train_indices)
-    val_dataset = Subset(train_val_dataset, val_indices)
-
+    # create dataloaders
     dataloaders = {'train': DataLoader(train_dataset, 
-                                       batch_size=batch_size,
+                                       batch_size=args.batch_size,
                                        shuffle=True, 
                                        num_workers=4),
                    'val': DataLoader(val_dataset, 
-                                     batch_size=batch_size,
+                                     batch_size=args.batch_size,
                                      shuffle=False, 
                                      num_workers=4),                                       
     }
 
 
+    t0 = time.time()
+    history = train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=args.epochs)
+    time_elapsed = time.time() - t0
+    print('\nTraining complete in {:.0f}m {:.0f}s'.format(
+        time_elapsed // 60, time_elapsed % 60))    
 
-    model = models.Net12()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
-    criterion = nn.MSELoss()
-
-
-    model, history = train_model(model, dataloaders, criterion, optimizer, scheduler, num_epochs=5)
+    title = datetime.datetime.now().isoformat()
 
     # store model, store history
-    fig = history_plot_image(history, 'runs/daddel1.png')
-
-
-
-    from torch.utils.tensorboard import SummaryWriter
-    # default `log_dir` is "runs" - we'll be more specific here
-    writer = SummaryWriter('runs/experiment_3')
-    #writer.add_image('history', img)
-
-    model_dir = 'saved_models/'
-    model_name = 'keypoints_model_xx.pt'
+    fig = plot_history(history)
+    fig.savefig(f'{args.save_dir}/{title}_curves.png')
 
     # after training, save your model parameters in the dir 'saved_models'
-    torch.save(model.state_dict(), model_dir+model_name)
+    torch.save(model.state_dict(), f"{args.save_dir}/{title}.pt")
 
-    writer.add_figure('train_val', fig)
-    #writer.add_graph(model)
-    writer.add_hparams({'batch_size': 16,
-                        'lr': 0.01,
-                        'arch': 'Net12',
-                       })
-    writer.add_scalars('lalala', history)
-    writer.close()
+    # save parameters. 
+    params = {'loss_history': history,
+            'title': title,
+            'time_elapsed': time_elapsed
+    }
+    params.update(vars(args))
+
+
+    with open(f"{args.save_dir}/{title}_params.json", "w") as fp:
+        json.dump(params, fp, indent=2)
