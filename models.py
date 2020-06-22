@@ -59,6 +59,8 @@ def pool_dims(input_size, k, s):
     return (input_size - k)//s + 1
 
 
+
+
 class Net12(nn.Module):
 
     IN_CHANNELS_CONV1 = 1    # grayscale image
@@ -177,7 +179,7 @@ class Net22d(Net22):
 
     def __init__(self):
         super().__init__()
-        self.drop1 = nn.Dropout2d(0.25)
+        self.drop1 = nn.Dropout(0.25)
         self.drop2 = nn.Dropout(0.5)
 
     def forward(self, x):
